@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
 # Install uv using the official method
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -48,7 +48,8 @@ RUN npm run build
 WORKDIR /app
 
 # Runtime stage
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.11-slim-bookworm AS runtime
+
 
 # Install only runtime system dependencies (no build tools)
 # Add Node.js 20.x LTS for running frontend
