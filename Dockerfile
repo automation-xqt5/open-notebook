@@ -1,3 +1,5 @@
+ARG CACHE_BUST
+
 # Build stage
 FROM python:3.11-slim AS builder
 
@@ -21,6 +23,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+
+RUN echo "Cache bust: $CACHE_BUST"
 
 # Set the working directory in the container to /app
 WORKDIR /app
