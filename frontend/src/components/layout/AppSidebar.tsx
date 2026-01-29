@@ -141,7 +141,7 @@ export function AppSidebar() {
               <div className="flex items-center gap-2">
                 <Image src="/logo.svg" alt={t.common.appName} width={32} height={32} />
                 <span className="text-base font-medium text-sidebar-foreground">
-                  {t.common.appName}
+                  {"XQT5 Notebook"}
                 </span>
               </div>
               <Button
