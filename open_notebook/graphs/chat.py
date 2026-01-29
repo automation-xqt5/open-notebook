@@ -65,6 +65,10 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
                 max_tokens=8192,
             )
         )
+    # --- FIX PARA EL ERROR "Connection error / Client has been closed" ---
+    if hasattr(model, "streaming"):
+        model.streaming = False
+    # ---------------------------------------------------------------------
 
     ai_message = model.invoke(payload)
 
