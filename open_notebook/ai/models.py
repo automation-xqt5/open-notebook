@@ -1,5 +1,66 @@
 from typing import ClassVar, Dict, Optional, Union
+import os
 import httpx
+
+# ═══════════════════════════════════════════════════════════════
+# ⭐ OPENAI HTTP CLIENT PATCH - Direkt hier integriert
+# ═══════════════════════════════════════════════════════════════
+
+from loguru import logger
+
+# Globaler persistenter HTTP Client
+_GLOBAL_HTTP_CLIENT = None
+
+def get_persistent_http_client():
+    """Gibt einen persistenten HTTP Client zurück"""
+    global _GLOBAL_HTTP_CLIENT
+    
+    if _GLOBAL_HTTP_CLIENT is None:
+        timeout_value = float(os.getenv("OPENAI_TIMEOUT", "120"))
+        
+        _GLOBAL_HTTP_CLIENT = httpx.Client(
+            timeout=httpx.Timeout(
+                timeout=timeout_value,
+                connect=60.0,
+                read=timeout_value,
+                write=30.0,
+                pool=5.0
+            ),
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=50,
+                keepalive_expiry=300.0
+            ),
+            http1=True,
+            http2=False,
+        )
+        logger.info(f"🔧 Persistent HTTP client created with timeout={timeout_value}s")
+    
+    return _GLOBAL_HTTP_CLIENT
+
+# Monkey Patch für OpenAI
+try:
+    from openai import OpenAI
+    
+    _original_openai_init = OpenAI.__init__
+    
+    def patched_openai_init(self, *args, **kwargs):
+        if 'http_client' not in kwargs:
+            kwargs['http_client'] = get_persistent_http_client()
+            logger.debug("🔧 Injected persistent HTTP client into OpenAI")
+        return _original_openai_init(self, *args, **kwargs)
+    
+    OpenAI.__init__ = patched_openai_init
+    logger.success("✅ OpenAI HTTP client patch applied")
+    
+except ImportError:
+    logger.warning("⚠️ OpenAI not installed, skipping patch")
+except Exception as e:
+    logger.error(f"❌ Failed to apply OpenAI patch: {e}")
+
+# ═══════════════════════════════════════════════════════════════
+# REST DES ORIGINALEN CODES
+# ═══════════════════════════════════════════════════════════════
 
 from esperanto import (
     AIFactory,
@@ -8,7 +69,6 @@ from esperanto import (
     SpeechToTextModel,
     TextToSpeechModel,
 )
-from loguru import logger
 
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel, RecordModel
@@ -37,13 +97,12 @@ class DefaultModels(RecordModel):
     large_context_model: Optional[str] = None
     default_text_to_speech_model: Optional[str] = None
     default_speech_to_text_model: Optional[str] = None
-    # default_vision_model: Optional[str]
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
 
     @classmethod
     async def get_instance(cls) -> "DefaultModels":
-        """Always fetch fresh defaults from database (override parent caching behavior)"""
+        """Always fetch fresh defaults from database"""
         result = await repo_query(
             "SELECT * FROM ONLY $record_id",
             {"record_id": ensure_record_id(cls.record_id)},
@@ -59,7 +118,6 @@ class DefaultModels(RecordModel):
         else:
             data = {}
 
-        # Create new instance with fresh data (bypass singleton cache)
         instance = object.__new__(cls)
         object.__setattr__(instance, "__dict__", {})
         super(RecordModel, instance).__init__(**data)
@@ -68,19 +126,17 @@ class DefaultModels(RecordModel):
 
 class ModelManager:
     def __init__(self):
-        # ⭐ FIX: Erstelle einen persistenten HTTP Client
-        self._http_client = httpx.Client(
-            timeout=httpx.Timeout(120.0, connect=60.0),
-            limits=httpx.Limits(
-                max_keepalive_connections=10,
-                max_connections=20,
-                keepalive_expiry=120.0
-            )
-        )
-        logger.info("ModelManager initialized with persistent HTTP client")
+        self._http_client = None
+        logger.info("ModelManager initialized")
+
+    def _get_http_client(self):
+        """Lazy initialization des HTTP Clients"""
+        if self._http_client is None:
+            self._http_client = get_persistent_http_client()
+        return self._http_client
 
     async def get_model(self, model_id: str, **kwargs) -> Optional[ModelType]:
-        """Get a model by ID. Esperanto will cache the actual model instance."""
+        """Get a model by ID. For OpenAI, use ChatOpenAI directly."""
         if not model_id:
             return None
 
@@ -97,15 +153,29 @@ class ModelManager:
         ]:
             raise ValueError(f"Invalid model type: {model.type}")
 
-        # Create model based on type (Esperanto will cache the instance)
-        if model.type == "language":
+        # ⭐ FIX: Für OpenAI language models, ChatOpenAI direkt nutzen
+        if model.type == "language" and model.provider.lower() == "openai":
+            from langchain_openai import ChatOpenAI
+            
+            logger.debug(f"Creating ChatOpenAI directly: {model.name}")
+            
+            return ChatOpenAI(
+                model=model.name,
+                api_key=os.getenv("OPENAI_API_KEY"),
+                timeout=float(os.getenv("OPENAI_TIMEOUT", "120")),
+                max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "3")),
+                streaming=kwargs.get("streaming", False),
+                http_client=self._get_http_client(),
+                **{k: v for k, v in kwargs.items() if k not in ['streaming', 'timeout', 'max_retries']}
+            )
+        
+        # Für andere Provider: Esperanto
+        elif model.type == "language":
             kwargs["streaming"] = False
-            # ⭐ FIX: HTTP Client Konfiguration
             kwargs["timeout"] = 120
             kwargs["max_retries"] = 3
-            kwargs["http_client"] = self._http_client  # Verwende persistenten Client
             
-            logger.debug(f"Creating language model: {model.name} ({model.provider})")
+            logger.debug(f"Creating language model via Esperanto: {model.name} ({model.provider})")
             
             return AIFactory.create_language(
                 model_name=model.name,
@@ -177,13 +247,7 @@ class ModelManager:
         return model
 
     async def get_default_model(self, model_type: str, **kwargs) -> Optional[ModelType]:
-        """
-        Get the default model for a specific type.
-
-        Args:
-            model_type: The type of model to retrieve (e.g., 'chat', 'embedding', etc.)
-            **kwargs: Additional arguments to pass to the model constructor
-        """
+        """Get the default model for a specific type."""
         defaults = await self.get_defaults()
         model_id = None
 
@@ -220,11 +284,11 @@ class ModelManager:
                 f"Please go to Settings → Models and reconfigure the default model."
             )
             return None
-    
+
     def __del__(self):
-        """Cleanup: Close HTTP client when ModelManager is destroyed"""
+        """Cleanup HTTP client on destroy"""
         try:
-            if hasattr(self, '_http_client'):
+            if hasattr(self, '_http_client') and self._http_client is not None:
                 self._http_client.close()
                 logger.debug("HTTP client closed")
         except Exception as e:
