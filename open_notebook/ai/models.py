@@ -1,4 +1,5 @@
 from typing import ClassVar, Dict, Optional, Union
+import httpx
 
 from esperanto import (
     AIFactory,
@@ -67,7 +68,16 @@ class DefaultModels(RecordModel):
 
 class ModelManager:
     def __init__(self):
-        pass  # No caching needed
+        # ⭐ FIX: Erstelle einen persistenten HTTP Client
+        self._http_client = httpx.Client(
+            timeout=httpx.Timeout(120.0, connect=60.0),
+            limits=httpx.Limits(
+                max_keepalive_connections=10,
+                max_connections=20,
+                keepalive_expiry=120.0
+            )
+        )
+        logger.info("ModelManager initialized with persistent HTTP client")
 
     async def get_model(self, model_id: str, **kwargs) -> Optional[ModelType]:
         """Get a model by ID. Esperanto will cache the actual model instance."""
@@ -90,8 +100,13 @@ class ModelManager:
         # Create model based on type (Esperanto will cache the instance)
         if model.type == "language":
             kwargs["streaming"] = False
-            kwargs["timeout"] = 120        
+            # ⭐ FIX: HTTP Client Konfiguration
+            kwargs["timeout"] = 120
             kwargs["max_retries"] = 3
+            kwargs["http_client"] = self._http_client  # Verwende persistenten Client
+            
+            logger.debug(f"Creating language model: {model.name} ({model.provider})")
+            
             return AIFactory.create_language(
                 model_name=model.name,
                 provider=model.provider,
@@ -205,6 +220,15 @@ class ModelManager:
                 f"Please go to Settings → Models and reconfigure the default model."
             )
             return None
+    
+    def __del__(self):
+        """Cleanup: Close HTTP client when ModelManager is destroyed"""
+        try:
+            if hasattr(self, '_http_client'):
+                self._http_client.close()
+                logger.debug("HTTP client closed")
+        except Exception as e:
+            logger.warning(f"Error closing HTTP client: {e}")
 
 
 model_manager = ModelManager()
