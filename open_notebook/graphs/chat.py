@@ -25,10 +25,10 @@ async def call_model_with_messages(state: ThreadState, config: RunnableConfig) -
     payload = [SystemMessage(content=system_prompt)] + state.get("messages", [])
     model_id = config.get("configurable", {}).get("model_id") or state.get("model_override")
 
-    # Provisionamos el modelo (aquí se mantenía el error antes)
+   
     model = await provision_langchain_model(str(payload), model_id, "chat", max_tokens=8192)
 
-    # Forzamos que no haya streaming para mayor estabilidad
+    
     if hasattr(model, "streaming"):
         model.streaming = False
 
