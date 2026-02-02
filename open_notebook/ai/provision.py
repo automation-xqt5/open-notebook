@@ -1,7 +1,7 @@
 from typing import Union
 from esperanto import LanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_openai import ChatOpenAI  # ⭐ NEU
+from langchain_openai import ChatOpenAI 
 from loguru import logger
 
 from open_notebook.ai.models import model_manager
@@ -48,7 +48,7 @@ async def provision_langchain_model(
             f"Please go to Settings → Models and configure a default model for '{default_type}'."
         )
     
-    # ⭐ GEÄNDERT: Akzeptiere sowohl LanguageModel (Esperanto) als auch ChatOpenAI (LangChain)
+   
     if isinstance(model, LanguageModel):
         # Esperanto Model → konvertiere zu LangChain
         logger.debug(f"Converting Esperanto LanguageModel to LangChain")
