@@ -14,6 +14,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "XQT5 Notebook",
   description: "Privacy-focused research and knowledge management",
+  icons: {
+    icon: "/icon.svg", 
+  },
 };
 
 export default function RootLayout({
