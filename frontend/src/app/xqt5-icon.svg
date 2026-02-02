@@ -1,0 +1,9 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark blue circle (Q outer ring) -->
+  <circle cx="32" cy="28" r="18" fill="#1e3a5f" stroke="none"/>
+  <!-- White inner circle -->
+  <circle cx="32" cy="28" r="12" fill="white"/>
+  <!-- Orange vertical rectangle (Q tail, overlapping into white area) -->
+  <rect x="30" y="34" width="4" height="22" fill="#ff6b35" rx="1"/>
+</svg>
+
