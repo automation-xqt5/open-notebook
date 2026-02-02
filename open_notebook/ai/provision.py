@@ -1,7 +1,6 @@
 from typing import Union
 from esperanto import LanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_openai import ChatOpenAI 
 from loguru import logger
 
 from open_notebook.ai.models import model_manager
@@ -20,7 +19,7 @@ async def provision_langchain_model(
     tokens = token_count(content)
     model = None
     selection_reason = ""
-    
+
     if tokens > 105_000:
         selection_reason = f"large_context (content has {tokens} tokens)"
         logger.debug(
@@ -33,9 +32,9 @@ async def provision_langchain_model(
     else:
         selection_reason = f"default for type={default_type}"
         model = await model_manager.get_default_model(default_type, **kwargs)
-    
+
     logger.debug(f"Using model: {model}")
-    
+
     if model is None:
         logger.error(
             f"Model provisioning failed: No model found. "
@@ -47,24 +46,16 @@ async def provision_langchain_model(
             f"No model configured for {selection_reason}. "
             f"Please go to Settings → Models and configure a default model for '{default_type}'."
         )
-    
-   
-    if isinstance(model, LanguageModel):
-        # Esperanto Model → konvertiere zu LangChain
-        logger.debug(f"Converting Esperanto LanguageModel to LangChain")
-        return model.to_langchain()
-    elif isinstance(model, (ChatOpenAI, BaseChatModel)):
-        # Bereits ein LangChain Model → direkt zurückgeben
-        logger.debug(f"Using LangChain model directly: {type(model).__name__}")
-        return model
-    else:
-        # Ungültiger Typ
+
+    if not isinstance(model, LanguageModel):
         logger.error(
-            f"Model type mismatch: Expected LanguageModel or ChatOpenAI but got {type(model).__name__}. "
+            f"Model type mismatch: Expected LanguageModel but got {type(model).__name__}. "
             f"Selection reason: {selection_reason}. "
             f"model_id={model_id}, default_type={default_type}."
         )
         raise ValueError(
-            f"Model is not a valid language model: {model}. "
+            f"Model is not a LanguageModel: {model}. "
             f"Please check that the model configured for '{default_type}' is a language model, not an embedding or speech model."
         )
+
+    return model.to_langchain()
