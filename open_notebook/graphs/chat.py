@@ -31,28 +31,44 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         "model_override"
     )
 
-    # Creamos un bucle temporal para obtener el modelo de forma segura
-    loop = asyncio.new_event_loop()
+    # Handle async model provisioning from sync context
+    def run_in_new_loop():
+        """Run the async function in a new event loop"""
+        new_loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(new_loop)
+            return new_loop.run_until_complete(
+                provision_langchain_model(
+                    str(payload), model_id, "chat", max_tokens=8192
+                )
+            )
+        finally:
+            new_loop.close()
+            asyncio.set_event_loop(None)
+
     try:
-        asyncio.set_event_loop(loop)
-        model = loop.run_until_complete(
+        # Try to get the current event loop
+        asyncio.get_running_loop()
+        # If we're in an event loop, run in a thread with a new loop
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_new_loop)
+            model = future.result()
+    except RuntimeError:
+        # No event loop running, safe to use asyncio.run()
+        model = asyncio.run(
             provision_langchain_model(
-                str(payload), model_id, "chat", max_tokens=8192
+                str(payload),
+                model_id,
+                "chat",
+                max_tokens=8192,
             )
         )
-        
-        # ---  ---
-       
-        if hasattr(model, "streaming"):
-            model.streaming = False
-        # ----------------------------------------
-        
-        
-        ai_message = model.invoke(payload)
-    finally:
-        loop.close()
 
-   
+    ai_message = model.invoke(payload)
+
+    # Clean thinking content from AI response (e.g., <think>...</think> tags)
     content = (
         ai_message.content
         if isinstance(ai_message.content, str)
