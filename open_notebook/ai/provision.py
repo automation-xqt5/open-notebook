@@ -1,6 +1,7 @@
 from typing import Union
 from esperanto import LanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_openai import ChatOpenAI 
 from loguru import logger
 
 from open_notebook.ai.models import model_manager
