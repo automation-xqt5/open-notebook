@@ -58,7 +58,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
   })
 
   
-  const scheduleMessageRemoval = useCallback((messageId: string, delay: number = 2000) => {
+  const scheduleMessageRemoval = useCallback((messageId: string, delay: number = 1000) => {
     // Lösche vorherigen Timer falls vorhanden
     const existingTimer = messageTimers.current.get(messageId)
     if (existingTimer) {
