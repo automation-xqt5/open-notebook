@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { getApiErrorKey } from '@/lib/utils/error-handler'
@@ -31,8 +31,10 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
   const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState<number>(0)
   const [charCount, setCharCount] = useState<number>(0)
-  // Pending model override for when user changes model before a session exists
   const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
+  
+  
+  const messageTimers = useRef<Map<string, NodeJS.Timeout>>(new Map())
 
   // Fetch sessions for this notebook
   const {
@@ -55,6 +57,32 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     enabled: !!notebookId && !!currentSessionId
   })
 
+  
+  const scheduleMessageRemoval = useCallback((messageId: string, delay: number = 2000) => {
+    // Lösche vorherigen Timer falls vorhanden
+    const existingTimer = messageTimers.current.get(messageId)
+    if (existingTimer) {
+      clearTimeout(existingTimer)
+    }
+
+    // Setze neuen Timer
+    const timer = setTimeout(() => {
+      setMessages(prev => prev.filter(msg => msg.id !== messageId))
+      messageTimers.current.delete(messageId)
+    }, delay)
+
+    messageTimers.current.set(messageId, timer)
+  }, [])
+
+  
+  useEffect(() => {
+    return () => {
+      // Lösche alle Timer beim Cleanup
+      messageTimers.current.forEach(timer => clearTimeout(timer))
+      messageTimers.current.clear()
+    }
+  }, [])
+
   // Update messages when current session changes
   useEffect(() => {
     if (currentSession?.messages) {
@@ -65,7 +93,6 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
   // Auto-select most recent session when sessions are loaded
   useEffect(() => {
     if (sessions.length > 0 && !currentSessionId) {
-      // Sessions are sorted by created date desc from API
       const mostRecentSession = sessions[0]
       setCurrentSessionId(mostRecentSession.id)
     }
@@ -131,13 +158,11 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
 
   // Build context from sources and notes based on user selections
   const buildContext = useCallback(async () => {
-    // Build context_config mapping IDs to selection modes
     const context_config: { sources: Record<string, string>, notes: Record<string, string> } = {
       sources: {},
       notes: {}
     }
 
-    // Map source selections
     sources.forEach(source => {
       const mode = contextSelections.sources[source.id]
       if (mode === 'insights') {
@@ -149,7 +174,6 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
       }
     })
 
-    // Map note selections
     notes.forEach(note => {
       const mode = contextSelections.notes[note.id]
       if (mode === 'full') {
@@ -159,13 +183,11 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
       }
     })
 
-    // Call API to build context with actual content
     const response = await chatApi.buildContext({
       notebook_id: notebookId,
       context_config
     })
 
-    // Store token and char counts
     setTokenCount(response.token_count)
     setCharCount(response.char_count)
 
@@ -185,12 +207,10 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
         const newSession = await chatApi.createSession({
           notebook_id: notebookId,
           title: defaultTitle,
-          // Include pending model override when creating session
           model_override: pendingModelOverride ?? undefined
         })
         sessionId = newSession.id
         setCurrentSessionId(sessionId)
-        // Clear pending model override now that it's applied to the session
         setPendingModelOverride(null)
         queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
@@ -225,6 +245,13 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
       // Update messages with API response
       setMessages(response.messages)
 
+     
+      response.messages.forEach(msg => {
+        if (msg.type === 'ai') {
+          scheduleMessageRemoval(msg.id, 2000) // 2 Sekunden
+        }
+      })
+
       // Refetch current session to get updated data
       await refetchCurrentSession()
     } catch (err: unknown) {
@@ -244,7 +271,8 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     buildContext,
     refetchCurrentSession,
     queryClient,
-    t
+    t,
+    scheduleMessageRemoval 
   ])
 
   // Switch session
@@ -273,16 +301,14 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     return deleteSessionMutation.mutate(sessionId)
   }, [deleteSessionMutation])
 
-  // Set model override - handles both existing sessions and pending state
+  // Set model override
   const setModelOverride = useCallback((model: string | null) => {
     if (currentSessionId) {
-      // Session exists - update it directly
       updateSessionMutation.mutate({
         sessionId: currentSessionId,
         data: { model_override: model }
       })
     } else {
-      // No session yet - store as pending
       setPendingModelOverride(model)
     }
   }, [currentSessionId, updateSessionMutation])
